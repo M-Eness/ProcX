@@ -11,9 +11,10 @@
 #include <time.h>       // time_t, time(), ctime()
 #include <fcntl.h>      // O_CREAT, O_RDWR
 #include <sys/mman.h>   // shm_open, mmap
+#include <semaphore.h> // semaphore fonksiyonları
 
 #define SHM_NAME "/procx_shm"
-
+#define SEM_NAME "/procx_sem"
 
 // Process bilgisi
 typedef enum {
@@ -50,6 +51,9 @@ typedef struct {
     pid_t target_pid; // Hedef process PID
 } Message;
 
+sem_t *procx_sem;
+SharedData *shared_memory;
+
 int parse_command(char *line, char **argv, int max_args, int *detached) {
     int argc = 0;
     char *token;
@@ -70,7 +74,7 @@ int parse_command(char *line, char **argv, int max_args, int *detached) {
     return argc;
 }
 
-SharedData* init_shared_memory() {
+void init_shared_memory() {
     // Shared Memory
     int shm_fd = shm_open(SHM_NAME, O_RDWR, 0666);
     int is_first = 0;
@@ -94,7 +98,7 @@ SharedData* init_shared_memory() {
     }
 
     // Mapping işlemi
-    SharedData *shared_memory = mmap(NULL, sizeof(SharedData), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+    shared_memory = mmap(NULL, sizeof(SharedData), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
     if(shared_memory == MAP_FAILED) {
         perror("mmap hatası");
         close(shm_fd);
@@ -110,13 +114,23 @@ SharedData* init_shared_memory() {
 
     printf("Mevcut process sayısı: %d\n", shared_memory->process_count);
     close(shm_fd);
-    return shared_memory;
+}
+
+void init_semephore() {
+    procx_sem = sem_open(SEM_NAME, O_CREAT, 0666, 1);
+    if (procx_sem == SEM_FAILED) {
+        perror("Semaphore hatası");
+        exit(1);
+    }
+    printf("Semaphore oluşturuldu");
 }
 
 int main(int argc, char *argv[], char **envp) {
 
-    SharedData* shared_memory = init_shared_memory();
+    init_shared_memory();
+    init_semephore();
     shm_unlink(SHM_NAME); // Geçici (her başlangıçta baştan oluşturmak için)
+    sem_unlink(SEM_NAME); // Geçici (daha sonra bir clean fonksiyonu yazılacak)
 
 
     return 0;
