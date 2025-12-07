@@ -12,6 +12,8 @@
 #include <fcntl.h>      // O_CREAT, O_RDWR
 #include <sys/mman.h>   // shm_open, mmap
 
+#define SHM_NAME "/procx_shm"
+
 
 // Process bilgisi
 typedef enum {
@@ -70,11 +72,11 @@ int parse_command(char *line, char **argv, int max_args, int *detached) {
 
 SharedData* init_shared_memory() {
     // Shared Memory
-    int shm_fd = shm_open("/procx_shm", O_RDWR, 0666);
+    int shm_fd = shm_open(SHM_NAME, O_RDWR, 0666);
     int is_first = 0;
 
     if (shm_fd == -1) {
-        shm_fd = shm_open("/procx_shm",O_CREAT | O_RDWR, 0666);
+        shm_fd = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0666);
         if(shm_fd == -1) {
             perror("shm_open hatası");
             exit(1);
@@ -114,7 +116,7 @@ SharedData* init_shared_memory() {
 int main(int argc, char *argv[], char **envp) {
 
     SharedData* shared_memory = init_shared_memory();
-    shm_unlink("/procx_shm"); // Geçici (her başlangıçta baştan oluşturmak için)
+    shm_unlink(SHM_NAME); // Geçici (her başlangıçta baştan oluşturmak için)
 
 
     return 0;
