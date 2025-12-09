@@ -12,6 +12,7 @@
 #include <fcntl.h>      // O_CREAT, O_RDWR
 #include <sys/mman.h>   // shm_open, mmap
 #include <semaphore.h> // semaphore fonksiyonları
+#include <stdbool.h>
 
 #define SHM_NAME "/procx_shm"
 #define SEM_NAME "/procx_sem"
@@ -165,14 +166,65 @@ void list_processes() {
     sem_post(procx_sem);
 }
 
+int get_menu() {
+    char input[32];
+    int selection;
+
+    while(true) {
+        printf("\n");
+        printf("ProcX v1.0\n");
+        printf("------------------------\n");
+        printf("1. Yeni Program Çalıştır\n");
+        printf("2. Çalışan Programları Listele\n");
+        printf("3. Program Sonlandır\n");
+        printf("0. Çıkış\n");
+        printf("------------------------\n");
+        printf("Seçiminiz: ");
+
+        if(fgets(input, sizeof(input), stdin) != NULL) {
+            if (input[0] == '\n') continue;
+            if (input[0] < '0' || input[0] > '3') {
+                printf("Lütfen menüden geçerli bir seçenek (0-3) girin!\n");
+                continue;
+            }
+            selection = atoi(input);
+            if (selection >= 0 && selection < 4) {
+                return selection;
+            }else {
+                printf("Lütfen geçerli bir sayı girin!\n");
+            }
+        } else {
+            printf("Lütfen sayı girin!\n");
+        }
+    }
+}
+
 int main(int argc, char *argv[], char **envp) {
 
-    init_shared_memory();
-    init_semephore();
-    list_processes();
     shm_unlink(SHM_NAME); // Geçici (her başlangıçta baştan oluşturmak için)
     sem_unlink(SEM_NAME); // Geçici (daha sonra bir clean fonksiyonu yazılacak)
 
+    init_shared_memory();
+    init_semephore();
+    while (true) {
+        int choice = get_menu();
+        switch (choice) {
+        case 0:
+            // Programdan çık
+            printf("ProcX Kapatılıyor...\n");
+            return 0;
+        case 1:
+            // Process Başlat
+            break;
+        case 2:
+            list_processes();
+            break;
+        case 3:
+            // programı sonlandır
+            break;
 
+        }
+
+    }
     return 0;
 }
