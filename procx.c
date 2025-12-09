@@ -15,6 +15,7 @@
 
 #define SHM_NAME "/procx_shm"
 #define SEM_NAME "/procx_sem"
+#define MAX_PROCESSES 50
 
 // Process bilgisi
 typedef enum {
@@ -39,7 +40,7 @@ typedef struct {
 
 // Paylaşılan bellek yapısı
 typedef struct {
-    ProcessInfo processes[50]; // Maksimum 50 process
+    ProcessInfo processes[MAX_PROCESSES]; // Maksimum 50 process
     int process_count; // Aktif process sayısı
 } SharedData;
 
@@ -125,10 +126,50 @@ void init_semephore() {
     printf("Semaphore oluşturuldu");
 }
 
+void list_processes() {
+    sem_wait(procx_sem);
+
+    int count = 0;
+    time_t now = time(NULL);
+
+    printf("\n%35s\n", "ÇALIŞAN PROGRAMLAR");
+    printf("----------------------------------------------------------------------\n");
+    printf("%-8s | %-25s | %-10s | %-8s | %s\n",
+           "PID", "Command", "Mode", "Owner", "Süre");
+    printf("----------------------------------------------------------------------\n");
+
+    for(int i = 0; i < MAX_PROCESSES; i++) {
+        if (shared_memory->processes[i].is_active) {
+
+            long elapsed_seconds = now - shared_memory->processes[i].start_time;
+            char *mode_str = (shared_memory->processes[i].mode == DETACHED) ? "Detached" : "Attached";
+
+            printf("%-8d | %-25s | %-10s | %-8d | %ld%s\n",
+               shared_memory->processes[i].pid,      // PID
+               shared_memory->processes[i].command,  // Command
+               mode_str,                          // Mode (Attached/Detached)
+               shared_memory->processes[i].owner_pid,// Owner
+               elapsed_seconds,                   // Süre (sayı)
+               "s"                                // Sürenin sonuna 's' harfi
+               );
+            count++;
+        }
+    }
+    if (count == 0) {
+        printf("Aktif çalışan process bulunamadı.\n");
+    }
+
+    printf("----------------------------------------------------------------------\n");
+    printf("Toplam: %d process çalışıyor.\n\n", count);
+
+    sem_post(procx_sem);
+}
+
 int main(int argc, char *argv[], char **envp) {
 
     init_shared_memory();
     init_semephore();
+    list_processes();
     shm_unlink(SHM_NAME); // Geçici (her başlangıçta baştan oluşturmak için)
     sem_unlink(SEM_NAME); // Geçici (daha sonra bir clean fonksiyonu yazılacak)
 
