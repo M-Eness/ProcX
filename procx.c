@@ -56,16 +56,14 @@ typedef struct {
 sem_t *procx_sem;
 SharedData *shared_memory;
 
-int parse_command(char *line, char **argv, int max_args, int *detached) {
+int parse_command(char *line, char **argv, int max_args) {
     int argc = 0;
     char *token;
     // newline varsa sil
     line[strcspn(line, "\n")] = '\0';
-    *detached = 0;
     token = strtok(line, " ");
     while (token != NULL && argc < max_args) {
         if (strcmp(token, "&") == 0) {
-            *detached = 1;
             token = strtok(NULL, " ");
             continue;
         }
@@ -197,6 +195,67 @@ int get_menu() {
             printf("Lütfen sayı girin!\n");
         }
     }
+}
+
+void start_process(char* command, ProcessMode mode) {
+    char *argv[20];
+    char temp_command[256]; // orjinal command shared memorye yazmak için kopyalandı
+    strncpy(temp_command, command, 255);
+    int argument_count = parse_command(temp_command, argv, 20);
+    int status;
+    if (argument_count == 0) {
+        printf("Komut bulunamadı!");
+        return;
+    }
+    pid_t pid = fork();
+    if (pid < 0) {
+        perror("Fork failed");
+        return;
+    }else if (pid == 0) { // child
+        if (mode== DETACHED) {
+            setsid();
+        }
+        execvp(argv[0], argv);
+        perror("Execvp hatası!");
+        exit(1);
+    }else { // parent
+        sem_wait(procx_sem);
+
+        int index = -1;
+        for(int i = 0; i < MAX_PROCESSES; i++) {
+            if (shared_memory->processes[i].is_active == 0) {
+                index = i;
+                break;
+            }
+        }
+
+        if (index == -1) {
+            printf("Hata: Process tablosu dolu (Max 50)!\n");
+            kill(pid, SIGTERM); // Yer yoksa oluşturulan çocuğu öldür
+            sem_post(procx_sem);
+            return;
+        }
+        shared_memory->processes[index].pid = pid;
+        shared_memory->processes[index].owner_pid = getpid();
+        strcpy(shared_memory->processes[index].command, command);
+        shared_memory->processes[index].is_active = 1;
+        shared_memory->processes[index].mode = mode;
+        shared_memory->processes[index].start_time = time(NULL);
+        shared_memory->processes[index].status = RUNNING;
+
+        sem_post(procx_sem);
+
+        if (mode == ATTACHED) {
+            waitpid(pid, &status, 0);
+            sem_wait(procx_sem);
+            shared_memory->processes[index].status = TERMINATED;
+            shared_memory->processes[index].is_active = 0;
+            sem_post(procx_sem);
+        }
+
+
+    }
+
 }
 
 int main(int argc, char *argv[], char **envp) {
