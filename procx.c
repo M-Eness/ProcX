@@ -13,6 +13,7 @@
 #include <sys/mman.h>   // shm_open, mmap
 #include <semaphore.h> // semaphore fonksiyonları
 #include <stdbool.h>
+#include <ctype.h>
 
 #define SHM_NAME "/procx_shm"
 #define SEM_NAME "/procx_sem"
@@ -55,6 +56,18 @@ typedef struct {
 
 sem_t *procx_sem;
 SharedData *shared_memory;
+
+int is_numeric(const char *str) {
+    if (str == NULL || *str == '\0') return 0;
+
+    while (*str) {
+        if (!isdigit(*str)) {
+            return 0;
+        }
+        str++;
+    }
+    return 1;
+}
 
 int parse_command(char *line, char **argv, int max_args) {
     int argc = 0;
@@ -257,24 +270,69 @@ void start_process(char* command, ProcessMode mode) {
 
 void get_process_menu() {
     char komut[64];
-    char mode;
+    char mode[10];
     ProcessMode process_mode;
 
     while (true) {
         printf("Çalıştırılacak komutu giriniz: ");
         fgets(komut, sizeof(komut), stdin);
         printf("\nMod Seçin (0: Attached, 1: Detached): ");
-        if(fgets(&mode, sizeof(mode), stdin) != NULL) {
-            if (mode == '\n') continue;
-            if (mode != '0' && mode != '1') {
+        if(fgets(mode, sizeof(mode), stdin) != NULL) {
+            if (mode[0] == '\n') continue;
+            if (mode[0] != '0' && mode[0] != '1') {
                 printf("Lütfen menüden geçerli bir seçenek (0-1) girin!\n");
+                continue;
             }
-            process_mode = (ProcessMode)atoi(&mode);
+            process_mode = (ProcessMode)atoi(mode);
             start_process(komut, process_mode);
             break;
         }
     }
 }
+void stop_process(int target_pid) {
+    sem_wait(procx_sem);
+
+    int found = 0;
+    for(int i = 0; i < MAX_PROCESSES; i++) {
+        if (shared_memory->processes[i].is_active) {
+            if (shared_memory->processes[i].pid == target_pid) {
+                kill(target_pid, SIGTERM);
+                shared_memory->processes[i].is_active = 0;
+                shared_memory->processes[i].status = TERMINATED;
+                shared_memory->process_count--;
+
+                printf("[INFO] Process %d sonlandırıldı ve listeden silindi.\n", target_pid);
+                found = 1;
+                break;
+
+            }
+        }
+    }
+    if (!found) {
+        printf("[UYARI] PID %d listede bulunamadı!\n", target_pid);
+    }
+    sem_post(procx_sem);
+}
+
+
+void get_stop_menu() {
+    char c_pid[10];
+    int pid;
+
+    while (true) {
+        printf("Sonlandırılacak process PID: ");
+        if(fgets(&c_pid, sizeof(c_pid), stdin) != NULL) {
+            if(!is_numeric(c_pid)){
+            printf("Lütfen menüden geçerli bir seçenek (0-1) girin!\n");
+            continue;
+            }
+            pid = atoi(c_pid);
+            stop_process(pid);
+        }
+    }
+}
+
+
 
 
 int main(int argc, char *argv[], char **envp) {
@@ -300,6 +358,7 @@ int main(int argc, char *argv[], char **envp) {
             break;
         case 3:
             // programı sonlandır
+            get_stop_menu();
             break;
 
         }
