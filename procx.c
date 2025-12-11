@@ -14,6 +14,7 @@
 #include <semaphore.h> // semaphore fonksiyonları
 #include <stdbool.h>
 #include <ctype.h>
+#include <pthread.h>
 
 #define SHM_NAME "/procx_shm"
 #define SEM_NAME "/procx_sem"
@@ -313,8 +314,6 @@ void stop_process(int target_pid) {
     }
     sem_post(procx_sem);
 }
-
-
 void get_stop_menu() {
     char c_pid[10];
     int pid;
@@ -336,7 +335,6 @@ void get_stop_menu() {
         }
     }
 }
-
 void clean_resources() {
     if (shared_memory != NULL) {
         munmap(shared_memory, sizeof(SharedData));
@@ -355,11 +353,40 @@ void clean_resources() {
     printf("[INFO] Kaynaklar (SHM ve SEM) sistemden silindi.\n");
 }
 
+void* monitor_thread(void *arg) {
+    int pid;
+    int status;
+    while (1) {
+        sleep(2);
+        pid = waitpid(-1, &status, WNOHANG);
+        if (pid > 0) {
+            sem_wait(procx_sem);
+            for(int i = 0; i < MAX_PROCESSES; i++) {
+                if (shared_memory->processes[i].is_active) {
+                    if (shared_memory->processes[i].pid == pid) {
+                        shared_memory->processes[i].is_active = 0;
+                        shared_memory->processes[i].status = TERMINATED;
+                        shared_memory->process_count--;
+
+                        printf("[INFO] Monitor Thread Tarafından Process %d sonlandırıldı ve listeden silindi.\n", pid);
+                    }
+                }
+            }
+            sem_post(procx_sem);
+        }
+    }
+}
+
 
 int main(int argc, char *argv[], char **envp) {
 
     init_shared_memory();
     init_semephore();
+
+    pthread_t thread_id;
+    pthread_create(&thread_id, NULL, monitor_thread, NULL);
+    pthread_detach(thread_id);
+    
     while (true) {
         int choice = get_menu();
         switch (choice) {
