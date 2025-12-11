@@ -320,25 +320,43 @@ void get_stop_menu() {
     int pid;
 
     while (true) {
-        printf("Sonlandırılacak process PID: ");
-        if(fgets(&c_pid, sizeof(c_pid), stdin) != NULL) {
+        printf("Sonlandırılacak process PID (Çıkış için exit yazın): ");
+        if(fgets(c_pid, sizeof(c_pid), stdin) != NULL) {
+            c_pid[strcspn(c_pid, "\n")] = '\0';
+            if(strcmp(c_pid, "exit") == 0) {
+                return;
+            }
             if(!is_numeric(c_pid)){
-            printf("Lütfen menüden geçerli bir seçenek (0-1) girin!\n");
+            printf("Lütfen geçerli bir sayı girin!\n");
             continue;
             }
             pid = atoi(c_pid);
             stop_process(pid);
+            return;
         }
     }
 }
 
+void clean_resources() {
+    if (shared_memory != NULL) {
+        munmap(shared_memory, sizeof(SharedData));
+        printf("[INFO] Shared Memory bağlantısı kesildi.\n");
+    }
 
+    if (procx_sem != NULL) {
+        sem_close(procx_sem);
+        printf("[INFO] Semaphore bağlantısı kesildi.\n");
+    }
+
+    // Sistem tamamen kapanır
+    shm_unlink(SHM_NAME);
+    sem_unlink(SEM_NAME);
+
+    printf("[INFO] Kaynaklar (SHM ve SEM) sistemden silindi.\n");
+}
 
 
 int main(int argc, char *argv[], char **envp) {
-
-    shm_unlink(SHM_NAME); // Geçici (her başlangıçta baştan oluşturmak için)
-    sem_unlink(SEM_NAME); // Geçici (daha sonra bir clean fonksiyonu yazılacak)
 
     init_shared_memory();
     init_semephore();
@@ -348,6 +366,7 @@ int main(int argc, char *argv[], char **envp) {
         case 0:
             // Programdan çık
             printf("ProcX Kapatılıyor...\n");
+            clean_resources();
             return 0;
         case 1:
             // Process Başlat
