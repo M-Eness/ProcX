@@ -252,11 +252,30 @@ void start_process(char* command, ProcessMode mode) {
             shared_memory->processes[index].is_active = 0;
             sem_post(procx_sem);
         }
-
-
     }
-
 }
+
+void get_process_menu() {
+    char komut[64];
+    char mode;
+    ProcessMode process_mode;
+
+    while (true) {
+        printf("Çalıştırılacak komutu giriniz: ");
+        fgets(komut, sizeof(komut), stdin);
+        printf("\nMod Seçin (0: Attached, 1: Detached): ");
+        if(fgets(&mode, sizeof(mode), stdin) != NULL) {
+            if (mode == '\n') continue;
+            if (mode != '0' && mode != '1') {
+                printf("Lütfen menüden geçerli bir seçenek (0-1) girin!\n");
+            }
+            process_mode = (ProcessMode)atoi(&mode);
+            start_process(komut, process_mode);
+            break;
+        }
+    }
+}
+
 
 int main(int argc, char *argv[], char **envp) {
 
@@ -274,6 +293,7 @@ int main(int argc, char *argv[], char **envp) {
             return 0;
         case 1:
             // Process Başlat
+            get_process_menu();
             break;
         case 2:
             list_processes();
