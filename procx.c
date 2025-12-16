@@ -55,10 +55,10 @@ typedef struct {
     pid_t target_pid; // Hedef process PID
 } Message;
 
-sem_t *procx_sem;
-SharedData *shared_memory;
+sem_t* procx_sem;
+SharedData* shared_memory;
 
-int is_numeric(const char *str) {
+int is_numeric(const char* str) {
     if (str == NULL || *str == '\0') return 0;
 
     while (*str) {
@@ -70,9 +70,9 @@ int is_numeric(const char *str) {
     return 1;
 }
 
-int parse_command(char *line, char **argv, int max_args) {
+int parse_command(char* line, char** argv, int max_args) {
     int argc = 0;
-    char *token;
+    char* token;
     // newline varsa sil
     line[strcspn(line, "\n")] = '\0';
     token = strtok(line, " ");
@@ -95,7 +95,7 @@ void init_shared_memory() {
 
     if (shm_fd == -1) {
         shm_fd = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0666);
-        if(shm_fd == -1) {
+        if (shm_fd == -1) {
             perror("shm_open hatası");
             exit(1);
         }
@@ -103,8 +103,8 @@ void init_shared_memory() {
     }
 
     // Boyutu düzenle
-    if(is_first) {
-        if(ftruncate(shm_fd, sizeof(SharedData)) == -1) {
+    if (is_first) {
+        if (ftruncate(shm_fd, sizeof(SharedData)) == -1) {
             perror("ftruncate hatası");
             close(shm_fd);
             exit(1);
@@ -113,16 +113,17 @@ void init_shared_memory() {
 
     // Mapping işlemi
     shared_memory = mmap(NULL, sizeof(SharedData), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
-    if(shared_memory == MAP_FAILED) {
+    if (shared_memory == MAP_FAILED) {
         perror("mmap hatası");
         close(shm_fd);
         exit(1);
     }
 
-    if(is_first) {
+    if (is_first) {
         shared_memory->process_count = 0;
         printf("İlk process oluşturuldu\n");
-    }else {
+    }
+    else {
         printf("Shared Memorye dahil olundu\n");
     }
 
@@ -151,20 +152,19 @@ void list_processes() {
            "PID", "Command", "Mode", "Owner", "Süre");
     printf("----------------------------------------------------------------------\n");
 
-    for(int i = 0; i < MAX_PROCESSES; i++) {
+    for (int i = 0; i < MAX_PROCESSES; i++) {
         if (shared_memory->processes[i].is_active) {
-
             long elapsed_seconds = now - shared_memory->processes[i].start_time;
-            char *mode_str = (shared_memory->processes[i].mode == DETACHED) ? "Detached" : "Attached";
+            char* mode_str = (shared_memory->processes[i].mode == DETACHED) ? "Detached" : "Attached";
 
             printf("%-8d | %-25s | %-10s | %-8d | %ld%s\n",
-               shared_memory->processes[i].pid,      // PID
-               shared_memory->processes[i].command,  // Command
-               mode_str,                          // Mode (Attached/Detached)
-               shared_memory->processes[i].owner_pid,// Owner
-               elapsed_seconds,                   // Süre (sayı)
-               "s"                                // Sürenin sonuna 's' harfi
-               );
+                   shared_memory->processes[i].pid, // PID
+                   shared_memory->processes[i].command, // Command
+                   mode_str, // Mode (Attached/Detached)
+                   shared_memory->processes[i].owner_pid, // Owner
+                   elapsed_seconds, // Süre (sayı)
+                   "s" // Sürenin sonuna 's' harfi
+            );
             count++;
         }
     }
@@ -182,7 +182,7 @@ int get_menu() {
     char input[32];
     int selection;
 
-    while(true) {
+    while (true) {
         printf("\n");
         printf("ProcX v1.0\n");
         printf("------------------------\n");
@@ -193,7 +193,7 @@ int get_menu() {
         printf("------------------------\n");
         printf("Seçiminiz: ");
 
-        if(fgets(input, sizeof(input), stdin) != NULL) {
+        if (fgets(input, sizeof(input), stdin) != NULL) {
             if (input[0] == '\n') continue;
             if (input[0] < '0' || input[0] > '3') {
                 printf("Lütfen menüden geçerli bir seçenek (0-3) girin!\n");
@@ -202,17 +202,19 @@ int get_menu() {
             selection = atoi(input);
             if (selection >= 0 && selection < 4) {
                 return selection;
-            }else {
+            }
+            else {
                 printf("Lütfen geçerli bir sayı girin!\n");
             }
-        } else {
+        }
+        else {
             printf("Lütfen sayı girin!\n");
         }
     }
 }
 
 void start_process(char* command, ProcessMode mode) {
-    char *argv[20];
+    char* argv[20];
     char temp_command[256]; // orjinal command shared memorye yazmak için kopyalandı
     strncpy(temp_command, command, 255);
     int argument_count = parse_command(temp_command, argv, 20);
@@ -225,18 +227,20 @@ void start_process(char* command, ProcessMode mode) {
     if (pid < 0) {
         perror("Fork failed");
         return;
-    }else if (pid == 0) { // child
-        if (mode== DETACHED) {
+    }
+    else if (pid == 0) { // child
+        if (mode == DETACHED) {
             setsid();
         }
         execvp(argv[0], argv);
         perror("Execvp hatası!");
         exit(1);
-    }else { // parent
+    }
+    else { // parent
         sem_wait(procx_sem);
 
         int index = -1;
-        for(int i = 0; i < MAX_PROCESSES; i++) {
+        for (int i = 0; i < MAX_PROCESSES; i++) {
             if (shared_memory->processes[i].is_active == 0) {
                 index = i;
                 break;
@@ -278,7 +282,7 @@ void get_process_menu() {
         printf("Çalıştırılacak komutu giriniz: ");
         fgets(komut, sizeof(komut), stdin);
         printf("\nMod Seçin (0: Attached, 1: Detached): ");
-        if(fgets(mode, sizeof(mode), stdin) != NULL) {
+        if (fgets(mode, sizeof(mode), stdin) != NULL) {
             if (mode[0] == '\n') continue;
             if (mode[0] != '0' && mode[0] != '1') {
                 printf("Lütfen menüden geçerli bir seçenek (0-1) girin!\n");
@@ -290,11 +294,12 @@ void get_process_menu() {
         }
     }
 }
+
 void stop_process(int target_pid) {
     sem_wait(procx_sem);
 
     int found = 0;
-    for(int i = 0; i < MAX_PROCESSES; i++) {
+    for (int i = 0; i < MAX_PROCESSES; i++) {
         if (shared_memory->processes[i].is_active) {
             if (shared_memory->processes[i].pid == target_pid) {
                 kill(target_pid, SIGTERM);
@@ -305,7 +310,6 @@ void stop_process(int target_pid) {
                 printf("[INFO] Process %d sonlandırıldı ve listeden silindi.\n", target_pid);
                 found = 1;
                 break;
-
             }
         }
     }
@@ -314,20 +318,21 @@ void stop_process(int target_pid) {
     }
     sem_post(procx_sem);
 }
+
 void get_stop_menu() {
     char c_pid[10];
     int pid;
 
     while (true) {
         printf("Sonlandırılacak process PID (Çıkış için exit yazın): ");
-        if(fgets(c_pid, sizeof(c_pid), stdin) != NULL) {
+        if (fgets(c_pid, sizeof(c_pid), stdin) != NULL) {
             c_pid[strcspn(c_pid, "\n")] = '\0';
-            if(strcmp(c_pid, "exit") == 0) {
+            if (strcmp(c_pid, "exit") == 0) {
                 return;
             }
-            if(!is_numeric(c_pid)){
-            printf("Lütfen geçerli bir sayı girin!\n");
-            continue;
+            if (!is_numeric(c_pid)) {
+                printf("Lütfen geçerli bir sayı girin!\n");
+                continue;
             }
             pid = atoi(c_pid);
             stop_process(pid);
@@ -335,6 +340,7 @@ void get_stop_menu() {
         }
     }
 }
+
 void clean_resources() {
     if (shared_memory != NULL) {
         munmap(shared_memory, sizeof(SharedData));
@@ -353,23 +359,24 @@ void clean_resources() {
     printf("[INFO] Kaynaklar (SHM ve SEM) sistemden silindi.\n");
 }
 
-void* monitor_thread(void *arg) {
+void* monitor_thread(void* arg) {
     int pid;
     int status;
     while (1) {
         sleep(2);
-        pid = waitpid(-1, &status, WNOHANG);
-        if (pid > 0) {
+        while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
             sem_wait(procx_sem);
-            for(int i = 0; i < MAX_PROCESSES; i++) {
-                if (shared_memory->processes[i].is_active) {
-                    if (shared_memory->processes[i].pid == pid) {
-                        shared_memory->processes[i].is_active = 0;
-                        shared_memory->processes[i].status = TERMINATED;
-                        shared_memory->process_count--;
+            for (int i = 0; i < MAX_PROCESSES; i++) {
+                if (shared_memory->processes[i].is_active
+                    && shared_memory->processes[i].pid == pid) {
+                    shared_memory->processes[i].is_active = 0;
+                    shared_memory->processes[i].status = TERMINATED;
+                    shared_memory->process_count--;
 
-                        printf("[INFO] Monitor Thread Tarafından Process %d sonlandırıldı ve listeden silindi.\n", pid);
-                    }
+                    printf("\n[INFO] Monitor Thread Tarafından Process %d sonlandırıldı ve listeden silindi.\n", pid);
+
+                    // IPC ile mesaj gönderilecek
+                    break;
                 }
             }
             sem_post(procx_sem);
@@ -378,15 +385,14 @@ void* monitor_thread(void *arg) {
 }
 
 
-int main(int argc, char *argv[], char **envp) {
-
+int main(int argc, char* argv[], char** envp) {
     init_shared_memory();
     init_semephore();
 
     pthread_t thread_id;
     pthread_create(&thread_id, NULL, monitor_thread, NULL);
     pthread_detach(thread_id);
-    
+
     while (true) {
         int choice = get_menu();
         switch (choice) {
@@ -406,9 +412,7 @@ int main(int argc, char *argv[], char **envp) {
             // programı sonlandır
             get_stop_menu();
             break;
-
         }
-
     }
     return 0;
 }
