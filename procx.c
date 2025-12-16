@@ -185,8 +185,9 @@ void register_terminal() {
 
     sem_post(procx_sem);
 }
-void remove_terminal() {
-    if (shared_memory == NULL) return;
+int remove_terminal() {
+    if (shared_memory == NULL) return -1;
+    int terminal_count = 0;
 
     sem_wait(procx_sem);
     pid_t my_pid = getpid();
@@ -195,10 +196,12 @@ void remove_terminal() {
         if (shared_memory->active_terminals[i] == my_pid) {
             shared_memory->active_terminals[i] = 0;
             shared_memory->terminal_count--;
+            terminal_count = shared_memory->terminal_count;
             break;
         }
     }
     sem_post(procx_sem);
+    return terminal_count;
 }
 
 void send_message(int command, pid_t target) {
@@ -430,7 +433,7 @@ void get_stop_menu() {
 }
 
 void clean_resources() { // Bu fonksiyon güncellenecek
-    remove_terminal();
+    int terminal_count = remove_terminal();
     if (shared_memory != NULL) {
         munmap(shared_memory, sizeof(SharedData));
         printf("[INFO] Shared Memory bağlantısı kesildi.\n");
@@ -441,24 +444,23 @@ void clean_resources() { // Bu fonksiyon güncellenecek
         printf("[INFO] Semaphore bağlantısı kesildi.\n");
     }
 
-    if (msg_queue_id != -1) {
-        if (msgctl(msg_queue_id, IPC_RMID, NULL) == -1) { // IPC_RMID: Kuyruğu sistemden tamamen kaldırır
-            perror("[WARN] Message Queue silinemedi");
-        } else {
-            printf("[INFO] Message Queue sistemden silindi.\n");
+    if (terminal_count < 1) { // Son terminalse
+        if (msg_queue_id != -1) {
+            if (msgctl(msg_queue_id, IPC_RMID, NULL) == -1) { // IPC_RMID: Kuyruğu sistemden tamamen kaldırır
+                perror("[WARN] Message Queue silinemedi");
+            } else {
+                printf("[INFO] Message Queue sistemden silindi.\n");
+            }
         }
+        // Sistem tamamen kapanır
+        shm_unlink(SHM_NAME);
+        sem_unlink(SEM_NAME);
+        remove(MQ_NAME);
+        printf("[INFO] Kaynaklar (SHM, SEM, MQ) sistemden silindi.\n");
     }
-
-
-    // Sistem tamamen kapanır
-    shm_unlink(SHM_NAME);
-    sem_unlink(SEM_NAME);
-    remove(MQ_NAME);
-
-    printf("[INFO] Kaynaklar (SHM ve SEM) sistemden silindi.\n");
 }
 
-void* monitor_thread(void* arg) {
+void* monitor_thread(void* arg) { // TODO: Kendi çocuğu olmayan processlerde kontrol edilmeli
     int pid;
     int status;
     while (1) {
@@ -475,8 +477,6 @@ void* monitor_thread(void* arg) {
                     shared_memory->process_count--;
 
                     printf("\n[INFO] Monitor Thread Tarafından Process %d sonlandırıldı ve listeden silindi.\n", pid);
-
-
                     break;
                 }
             }
