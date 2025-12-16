@@ -15,9 +15,11 @@
 #include <stdbool.h>
 #include <ctype.h>
 #include <pthread.h>
+#include <sys/msg.h>
 
 #define SHM_NAME "/procx_shm"
 #define SEM_NAME "/procx_sem"
+#define MQ_NAME "/procx_mq"
 #define MAX_PROCESSES 50
 
 // Process bilgisi
@@ -54,6 +56,7 @@ typedef struct {
     pid_t sender_pid; // Gönderen PID
     pid_t target_pid; // Hedef process PID
 } Message;
+int msg_queue_id;
 
 sem_t* procx_sem;
 SharedData* shared_memory;
@@ -138,6 +141,34 @@ void init_semephore() {
         exit(1);
     }
     printf("Semaphore oluşturuldu");
+}
+
+void init_message_queue() {
+    int fd = open(MQ_NAME, O_CREAT | O_RDWR, 0666);
+    if (fd == -1) {
+        perror("ftok dosyası oluşturulamadı");
+        exit(1);
+    }
+    close(fd);
+    key_t key = ftok(MQ_NAME, 65);
+
+    msg_queue_id = msgget(key, 0666 | IPC_CREAT);
+    if (msg_queue_id == -1) {
+        perror("Message Queue oluşturulamadı");
+        exit(1);
+    }
+}
+
+void send_message(int command, pid_t target) {
+    Message message;
+    message.msg_type = 1;
+    message.command = command;
+    message.target_pid = target;
+    message.sender_pid = getpid();
+
+    if (msgsnd(msg_queue_id, &message, sizeof(message) - sizeof(long), 0) == -1) {
+        perror("Mesaj gönderilemedi");
+    }
 }
 
 void list_processes() {
@@ -341,7 +372,7 @@ void get_stop_menu() {
     }
 }
 
-void clean_resources() {
+void clean_resources() { // Bu fonksiyon güncellenecek
     if (shared_memory != NULL) {
         munmap(shared_memory, sizeof(SharedData));
         printf("[INFO] Shared Memory bağlantısı kesildi.\n");
@@ -352,9 +383,18 @@ void clean_resources() {
         printf("[INFO] Semaphore bağlantısı kesildi.\n");
     }
 
+    if (msg_queue_id != -1) {
+        if (msgctl(msg_queue_id, IPC_RMID, NULL) == -1) { // IPC_RMID: Kuyruğu sistemden tamamen kaldırır
+            perror("[WARN] Message Queue silinemedi");
+        } else {
+            printf("[INFO] Message Queue sistemden silindi.\n");
+        }
+    }
+
     // Sistem tamamen kapanır
     shm_unlink(SHM_NAME);
     sem_unlink(SEM_NAME);
+    remove(MQ_NAME);
 
     printf("[INFO] Kaynaklar (SHM ve SEM) sistemden silindi.\n");
 }
@@ -380,6 +420,27 @@ void* monitor_thread(void* arg) {
                 }
             }
             sem_post(procx_sem);
+        }
+    }
+}
+
+void* ipc_thread(void* arg) {
+    Message message;
+
+    while(1) {
+        if (msgrcv(msg_queue_id, &message, sizeof(message) - sizeof(long), 1, 0) == -1) {
+            perror("Mesaj kuyruktan alınamadı");
+            break;
+        }
+
+        if (message.sender_pid == getpid()) {
+            continue;
+        }
+
+        if (message.command == 1) {
+            printf("\n[IPC] Yeni process başlatıldı: %d \n> ", message.target_pid);
+        }else if (message.command == 2) {
+            printf("\n[IPC] Process sonlandı: %d \n> ", message.target_pid);
         }
     }
 }
