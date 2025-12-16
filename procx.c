@@ -18,9 +18,9 @@
 #include <sys/errno.h>
 #include <sys/msg.h>
 
-#define SHM_NAME "/procx_shm_v4"
-#define SEM_NAME "/procx_sem_v4"
-#define MQ_NAME "procx_mq_v4"
+#define SHM_NAME "/procx_shm_v5"
+#define SEM_NAME "/procx_sem_v5"
+#define MQ_NAME "procx_mq_v5"
 #define MAX_PROCESSES 50
 #define MAX_TERMINALS 2
 
@@ -464,6 +464,40 @@ void clean_resources() { // Bu fonksiyon güncellenecek
     }
 }
 
+void handle_sigint(int sig) {
+    printf("\n\n[SİSTEM] Kapatma sinyali (Ctrl+C) algılandı. Çıkış yapılıyor...\n");
+
+    // Terminale bağlı çocukları öldür
+    if (shared_memory != NULL && procx_sem != NULL) {
+        sem_wait(procx_sem);
+        pid_t my_pid = getpid();
+
+        for (int i = 0; i < MAX_PROCESSES; i++) {
+            // Process aktifse ve sahibi bensem
+            if (shared_memory->processes[i].is_active &&
+                shared_memory->processes[i].owner_pid == my_pid) {
+                if (shared_memory->processes[i].mode == ATTACHED) {
+                    // Process'i işletim sistemi seviyesinde öldür
+                    kill(shared_memory->processes[i].pid, SIGTERM);
+                    // Her durumda Shared Memory listesinden düşüyoruz çünkü ProcX kapanıyor.
+                    shared_memory->processes[i].is_active = 0;
+                    shared_memory->processes[i].status = TERMINATED;
+                    shared_memory->process_count--;
+                    printf("[TEMİZLİK] Kapatılırken attached process sonlandırıldı: %d\n",
+                           shared_memory->processes[i].pid);
+                }
+                else { // Detach processler
+                    // Çalışmaya devam eder ama artık procx yönetiminde olmaz??
+                    printf("[BİLGİ] Detached process arka planda bırakıldı: %d\n", shared_memory->processes[i].pid);
+                }
+            }
+        }
+        sem_post(procx_sem);
+    }
+    clean_resources();
+    exit(0);
+}
+
 void* monitor_thread(void* arg) {
     int status;
     while (1) {
@@ -524,6 +558,10 @@ void* ipc_thread(void* arg) {
 
     while (1) {
         if (msgrcv(msg_queue_id, &message, sizeof(message) - sizeof(long), getpid(), 0) == -1) {
+            // Eğer kuyruk kapatıldıysa - Tüm terminallerden çıkış yapıldıysa
+            if (errno == EIDRM || errno == EINVAL) {
+                break; // Döngüyü kır ve thread'i sonlandır
+            }
             perror("Mesaj kuyruktan alınamadı");
             break;
         }
@@ -547,6 +585,7 @@ int main(int argc, char* argv[], char** envp) {
     init_shared_memory();
     init_semephore();
     init_message_queue();
+    signal(SIGINT, handle_sigint);
     register_terminal();
 
     pthread_t thread_id;
