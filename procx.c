@@ -17,10 +17,11 @@
 #include <pthread.h>
 #include <sys/msg.h>
 
-#define SHM_NAME "/procx_shm"
-#define SEM_NAME "/procx_sem"
-#define MQ_NAME "/procx_mq"
+#define SHM_NAME "/procx_shm_v4"
+#define SEM_NAME "/procx_sem_v4"
+#define MQ_NAME "procx_mq_v4"
 #define MAX_PROCESSES 50
+#define MAX_TERMINALS 2
 
 // Process bilgisi
 typedef enum {
@@ -47,6 +48,8 @@ typedef struct {
 typedef struct {
     ProcessInfo processes[MAX_PROCESSES]; // Maksimum 50 process
     int process_count; // Aktif process sayısı
+    pid_t active_terminals[MAX_TERMINALS];
+    int terminal_count;
 } SharedData;
 
 // Mesaj yapısı
@@ -159,16 +162,63 @@ void init_message_queue() {
     }
 }
 
-void send_message(int command, pid_t target) {
-    Message message;
-    message.msg_type = 1;
-    message.command = command;
-    message.target_pid = target;
-    message.sender_pid = getpid();
+void register_terminal() {
+    sem_wait(procx_sem);
 
-    if (msgsnd(msg_queue_id, &message, sizeof(message) - sizeof(long), 0) == -1) {
-        perror("Mesaj gönderilemedi");
+    int registered = 0;
+
+    for (int i = 0; i < MAX_TERMINALS; i++) {
+        if (shared_memory->active_terminals[i] == 0 || shared_memory->active_terminals[i] == getpid()) {
+            shared_memory->active_terminals[i] = getpid();
+            shared_memory->terminal_count++;
+            registered = 1;
+            printf("\n[SİSTEM] Terminal %d olarak kaydedildi.\n", i + 1);
+            break;
+        }
     }
+
+    if (!registered) {
+        printf("\n[HATA] Terminal sınırı (2) dolu! Program başlatılamıyor.\n");
+        sem_post(procx_sem);
+        exit(1); // 3. terminal giremez
+    }
+
+    sem_post(procx_sem);
+}
+void remove_terminal() {
+    if (shared_memory == NULL) return;
+
+    sem_wait(procx_sem);
+    pid_t my_pid = getpid();
+
+    for (int i = 0; i < MAX_TERMINALS; i++) {
+        if (shared_memory->active_terminals[i] == my_pid) {
+            shared_memory->active_terminals[i] = 0;
+            shared_memory->terminal_count--;
+            break;
+        }
+    }
+    sem_post(procx_sem);
+}
+
+void send_message(int command, pid_t target) {
+    Message msg;
+    msg.command = command;
+    msg.sender_pid = getpid();
+    msg.target_pid = target;
+
+    sem_wait(procx_sem);
+
+    for (int i = 0; i < MAX_TERMINALS; i++) {
+        pid_t dest_pid = shared_memory->active_terminals[i];
+
+        // index doluysa VE o indexte ben yoksam
+        if (dest_pid != 0 && dest_pid != getpid()) {
+            msg.msg_type = dest_pid; // Adrese teslim
+            msgsnd(msg_queue_id, &msg, sizeof(Message) - sizeof(long), 0);
+        }
+    }
+    sem_post(procx_sem);
 }
 
 void list_processes() {
@@ -291,15 +341,21 @@ void start_process(char* command, ProcessMode mode) {
         shared_memory->processes[index].mode = mode;
         shared_memory->processes[index].start_time = time(NULL);
         shared_memory->processes[index].status = RUNNING;
+        shared_memory->process_count++;
+
 
         sem_post(procx_sem);
+
+        send_message(1, pid);
 
         if (mode == ATTACHED) {
             waitpid(pid, &status, 0);
             sem_wait(procx_sem);
             shared_memory->processes[index].status = TERMINATED;
             shared_memory->processes[index].is_active = 0;
+            shared_memory->process_count--;
             sem_post(procx_sem);
+            send_message(2, pid);
         }
     }
 }
@@ -340,6 +396,8 @@ void stop_process(int target_pid) {
 
                 printf("[INFO] Process %d sonlandırıldı ve listeden silindi.\n", target_pid);
                 found = 1;
+                sem_post(procx_sem);
+                send_message(2, target_pid);
                 break;
             }
         }
@@ -347,7 +405,6 @@ void stop_process(int target_pid) {
     if (!found) {
         printf("[UYARI] PID %d listede bulunamadı!\n", target_pid);
     }
-    sem_post(procx_sem);
 }
 
 void get_stop_menu() {
@@ -373,6 +430,7 @@ void get_stop_menu() {
 }
 
 void clean_resources() { // Bu fonksiyon güncellenecek
+    remove_terminal();
     if (shared_memory != NULL) {
         munmap(shared_memory, sizeof(SharedData));
         printf("[INFO] Shared Memory bağlantısı kesildi.\n");
@@ -391,6 +449,7 @@ void clean_resources() { // Bu fonksiyon güncellenecek
         }
     }
 
+
     // Sistem tamamen kapanır
     shm_unlink(SHM_NAME);
     sem_unlink(SEM_NAME);
@@ -405,21 +464,26 @@ void* monitor_thread(void* arg) {
     while (1) {
         sleep(2);
         while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+            int found = 0;
             sem_wait(procx_sem);
             for (int i = 0; i < MAX_PROCESSES; i++) {
                 if (shared_memory->processes[i].is_active
                     && shared_memory->processes[i].pid == pid) {
+                    found = 1;
                     shared_memory->processes[i].is_active = 0;
                     shared_memory->processes[i].status = TERMINATED;
                     shared_memory->process_count--;
 
                     printf("\n[INFO] Monitor Thread Tarafından Process %d sonlandırıldı ve listeden silindi.\n", pid);
 
-                    // IPC ile mesaj gönderilecek
+
                     break;
                 }
             }
             sem_post(procx_sem);
+            if (found) {
+                send_message(2, pid);
+            }
         }
     }
 }
@@ -428,7 +492,7 @@ void* ipc_thread(void* arg) {
     Message message;
 
     while(1) {
-        if (msgrcv(msg_queue_id, &message, sizeof(message) - sizeof(long), 1, 0) == -1) {
+        if (msgrcv(msg_queue_id, &message, sizeof(message) - sizeof(long), getpid(), 0) == -1) {
             perror("Mesaj kuyruktan alınamadı");
             break;
         }
@@ -443,16 +507,22 @@ void* ipc_thread(void* arg) {
             printf("\n[IPC] Process sonlandı: %d \n> ", message.target_pid);
         }
     }
+    return NULL;
 }
 
 
 int main(int argc, char* argv[], char** envp) {
     init_shared_memory();
     init_semephore();
+    init_message_queue();
+    register_terminal();
 
     pthread_t thread_id;
+    pthread_t thread_id_ipc;
     pthread_create(&thread_id, NULL, monitor_thread, NULL);
+    pthread_create(&thread_id_ipc, NULL, ipc_thread, NULL);
     pthread_detach(thread_id);
+    pthread_detach(thread_id_ipc);
 
     while (true) {
         int choice = get_menu();
