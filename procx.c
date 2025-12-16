@@ -15,6 +15,7 @@
 #include <stdbool.h>
 #include <ctype.h>
 #include <pthread.h>
+#include <sys/errno.h>
 #include <sys/msg.h>
 
 #define SHM_NAME "/procx_shm_v4"
@@ -59,6 +60,7 @@ typedef struct {
     pid_t sender_pid; // Gönderen PID
     pid_t target_pid; // Hedef process PID
 } Message;
+
 int msg_queue_id;
 
 sem_t* procx_sem;
@@ -185,6 +187,7 @@ void register_terminal() {
 
     sem_post(procx_sem);
 }
+
 int remove_terminal() {
     if (shared_memory == NULL) return -1;
     int terminal_count = 0;
@@ -448,7 +451,8 @@ void clean_resources() { // Bu fonksiyon güncellenecek
         if (msg_queue_id != -1) {
             if (msgctl(msg_queue_id, IPC_RMID, NULL) == -1) { // IPC_RMID: Kuyruğu sistemden tamamen kaldırır
                 perror("[WARN] Message Queue silinemedi");
-            } else {
+            }
+            else {
                 printf("[INFO] Message Queue sistemden silindi.\n");
             }
         }
@@ -460,29 +464,56 @@ void clean_resources() { // Bu fonksiyon güncellenecek
     }
 }
 
-void* monitor_thread(void* arg) { // TODO: Kendi çocuğu olmayan processlerde kontrol edilmeli
-    int pid;
+void* monitor_thread(void* arg) {
     int status;
     while (1) {
         sleep(2);
-        while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+        for (int i = 0; i < MAX_PROCESSES; i++) {
             int found = 0;
+            pid_t check_pid = -1;
+            pid_t owner_pid = -1;
+            int is_active = 0;
             sem_wait(procx_sem);
-            for (int i = 0; i < MAX_PROCESSES; i++) {
-                if (shared_memory->processes[i].is_active
-                    && shared_memory->processes[i].pid == pid) {
+            if (shared_memory->processes[i].is_active) {
+                is_active = 1;
+                owner_pid = shared_memory->processes[i].owner_pid;
+                check_pid = shared_memory->processes[i].pid;
+            }
+            sem_post(procx_sem);
+
+            if (!is_active) {
+                continue;
+            }
+
+
+            if (owner_pid == getpid()) { // Çocuğun parentı ben miyim?
+                if (waitpid(check_pid, &status, WNOHANG) == check_pid) { // Çocuk ölmüş mü?
                     found = 1;
+                }
+            }
+            else { // Çocuğun parentı ben değilsem
+                // kill sinyali gönderilemedi ve bunun nedeni pıd bulunaması (process ölmüş)
+                if (kill(check_pid, 0) == -1 && errno == ESRCH) {
+                    found = 1;
+                }
+            }
+            if (found) {
+                int cleaned = 0;
+                sem_wait(procx_sem);
+                // Kilidi alana kadar değişiklik oldu mu?
+                if (shared_memory->processes[i].is_active && shared_memory->processes[i].pid == check_pid) {
                     shared_memory->processes[i].is_active = 0;
                     shared_memory->processes[i].status = TERMINATED;
                     shared_memory->process_count--;
+                    cleaned = 1;
 
-                    printf("\n[INFO] Monitor Thread Tarafından Process %d sonlandırıldı ve listeden silindi.\n", pid);
-                    break;
+                    printf("\n[MONITOR] Process %d sonlandırıldı (Owner: %d).\n", check_pid, owner_pid);
                 }
-            }
-            sem_post(procx_sem);
-            if (found) {
-                send_message(2, pid);
+                sem_post(procx_sem);
+
+                if (cleaned) {
+                    send_message(2, check_pid);
+                }
             }
         }
     }
@@ -491,7 +522,7 @@ void* monitor_thread(void* arg) { // TODO: Kendi çocuğu olmayan processlerde k
 void* ipc_thread(void* arg) {
     Message message;
 
-    while(1) {
+    while (1) {
         if (msgrcv(msg_queue_id, &message, sizeof(message) - sizeof(long), getpid(), 0) == -1) {
             perror("Mesaj kuyruktan alınamadı");
             break;
@@ -503,7 +534,8 @@ void* ipc_thread(void* arg) {
 
         if (message.command == 1) {
             printf("\n[IPC] Yeni process başlatıldı: %d \n> ", message.target_pid);
-        }else if (message.command == 2) {
+        }
+        else if (message.command == 2) {
             printf("\n[IPC] Process sonlandı: %d \n> ", message.target_pid);
         }
     }
