@@ -131,6 +131,7 @@ void init_shared_memory() {
     }
 
     if (is_first) {
+        memset(shared_memory, 0, sizeof(SharedData)); // Belleği temizle
         shared_memory->process_count = 0;
         printf("İlk process oluşturuldu\n");
     }
@@ -142,7 +143,7 @@ void init_shared_memory() {
     close(shm_fd);
 }
 
-void init_semephore() {
+void init_semaphore() {
     procx_sem = sem_open(SEM_NAME, O_CREAT, 0666, 1);
     if (procx_sem == SEM_FAILED) {
         perror("Semaphore hatası");
@@ -173,11 +174,17 @@ void register_terminal() {
     int registered = 0;
 
     for (int i = 0; i < MAX_TERMINALS; i++) {
-        if (shared_memory->active_terminals[i] == 0 || shared_memory->active_terminals[i] == getpid()) {
+
+        if (shared_memory->active_terminals[i] == 0 ) {
             shared_memory->active_terminals[i] = getpid();
             shared_memory->terminal_count++;
             registered = 1;
             printf("\n[SİSTEM] Terminal %d olarak kaydedildi.\n", i + 1);
+            break;
+        }
+        if (shared_memory->active_terminals[i] == getpid()) {
+            registered = 1;
+            printf("\n[SİSTEM] Terminal tekrar bağlandı.\n");
             break;
         }
     }
@@ -511,6 +518,7 @@ void shutdown_system() {
                 else { // Detach processler
                     // Çalışmaya devam eder ama artık procx yönetiminde olmaz??
                     printf("[INFO] Detached process arka planda bırakıldı: %d\n", shared_memory->processes[i].pid);
+                    shared_memory->processes[i].owner_pid = -1; // artık sahibi ben değilim
                 }
             }
         }
@@ -620,7 +628,7 @@ void* ipc_thread(void* arg) {
 
 int main(int argc, char* argv[], char** envp) {
     init_shared_memory();
-    init_semephore();
+    init_semaphore();
     init_message_queue();
     // Action
     struct sigaction sa;
@@ -630,7 +638,7 @@ int main(int argc, char* argv[], char** envp) {
     sigaction(SIGINT, &sa, NULL);
 
     register_terminal();
-    
+
     pthread_create(&thread_id_monitor, NULL, monitor_thread, NULL);
     pthread_create(&thread_id_ipc, NULL, ipc_thread, NULL);
 
