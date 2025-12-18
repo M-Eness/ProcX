@@ -65,6 +65,8 @@ int msg_queue_id;
 sem_t* procx_sem;
 SharedData* shared_memory;
 volatile sig_atomic_t exit_requested = 0;
+pthread_t thread_id_monitor;
+pthread_t thread_id_ipc;
 void shutdown_system(void);
 
 int is_numeric(const char* str) {
@@ -477,6 +479,16 @@ void clean_resources() { // Bu fonksiyon güncellenecek
 void shutdown_system() {
     printf("\n\n[SİSTEM] Kapatma sinyali algılandı. Çıkış yapılıyor...\n");
 
+    exit_requested = 1;
+
+    // Kendi kendime boş bir mesaj atıyorum ki msgrcv kilidi açılsın.
+    Message poison_pill;
+    poison_pill.msg_type = getpid(); // Kendi PID'm
+    poison_pill.sender_pid = getpid();
+    poison_pill.command = 99;
+
+    msgsnd(msg_queue_id, &poison_pill, sizeof(Message) - sizeof(long), IPC_NOWAIT);
+
     // Terminale bağlı çocukları öldür
     if (shared_memory != NULL && procx_sem != NULL) {
         sem_wait(procx_sem);
@@ -504,6 +516,10 @@ void shutdown_system() {
         }
         sem_post(procx_sem);
     }
+    printf("[SİSTEM] Threadlerin kapanması bekleniyor...\n");
+    pthread_join(thread_id_monitor, NULL);
+    pthread_join(thread_id_ipc, NULL);
+
     clean_resources();
     exit(0);
 }
@@ -515,8 +531,9 @@ void handle_sigint(int sig) {
 
 void* monitor_thread(void* arg) {
     int status;
-    while (1) {
+    while (!exit_requested) {
         sleep(2);
+        if (exit_requested) break;
         for (int i = 0; i < MAX_PROCESSES; i++) {
             int found = 0;
             pid_t check_pid = -1;
@@ -566,18 +583,23 @@ void* monitor_thread(void* arg) {
             }
         }
     }
+    return NULL;
 }
 
 void* ipc_thread(void* arg) {
     Message message;
 
-    while (1) {
+    while (!exit_requested) {
         if (msgrcv(msg_queue_id, &message, sizeof(message) - sizeof(long), getpid(), 0) == -1) {
             // Eğer kuyruk kapatıldıysa - Tüm terminallerden çıkış yapıldıysa
             if (errno == EIDRM || errno == EINVAL) {
                 break; // Döngüyü kır ve thread'i sonlandır
             }
             perror("Mesaj kuyruktan alınamadı");
+            break;
+        }
+
+        if (exit_requested) {
             break;
         }
 
@@ -608,13 +630,9 @@ int main(int argc, char* argv[], char** envp) {
     sigaction(SIGINT, &sa, NULL);
 
     register_terminal();
-
-    pthread_t thread_id;
-    pthread_t thread_id_ipc;
-    pthread_create(&thread_id, NULL, monitor_thread, NULL);
+    
+    pthread_create(&thread_id_monitor, NULL, monitor_thread, NULL);
     pthread_create(&thread_id_ipc, NULL, ipc_thread, NULL);
-    pthread_detach(thread_id);
-    pthread_detach(thread_id_ipc);
 
     while (true) {
         int choice = get_menu();
@@ -622,7 +640,7 @@ int main(int argc, char* argv[], char** envp) {
         case 0:
             // Programdan çık
             printf("ProcX Kapatılıyor...\n");
-            clean_resources();
+            shutdown_system();
             return 0;
         case 1:
             // Process Başlat
