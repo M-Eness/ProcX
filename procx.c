@@ -18,9 +18,9 @@
 #include <sys/errno.h>
 #include <sys/msg.h>
 
-#define SHM_NAME "/procx_shm_v5"
-#define SEM_NAME "/procx_sem_v5"
-#define MQ_NAME "procx_mq_v5"
+#define SHM_NAME "/procx_shm_v6"
+#define SEM_NAME "/procx_sem_v6"
+#define MQ_NAME "procx_mq_v6"
 #define MAX_PROCESSES 50
 #define MAX_TERMINALS 2
 
@@ -396,14 +396,9 @@ void stop_process(int target_pid) {
         if (shared_memory->processes[i].is_active) {
             if (shared_memory->processes[i].pid == target_pid) {
                 kill(target_pid, SIGTERM);
-                shared_memory->processes[i].is_active = 0;
-                shared_memory->processes[i].status = TERMINATED;
-                shared_memory->process_count--;
-
                 printf("[INFO] Process %d sonlandırıldı ve listeden silindi.\n", target_pid);
                 found = 1;
                 sem_post(procx_sem);
-                send_message(2, target_pid);
                 break;
             }
         }
@@ -571,10 +566,10 @@ void* ipc_thread(void* arg) {
         }
 
         if (message.command == 1) {
-            printf("\n[IPC] Yeni process başlatıldı: %d \n> ", message.target_pid);
+            printf("\n[IPC] Yeni process başlatıldı: %d \n", message.target_pid);
         }
         else if (message.command == 2) {
-            printf("\n[IPC] Process sonlandı: %d \n> ", message.target_pid);
+            printf("\n[IPC] Process sonlandı: %d \n", message.target_pid);
         }
     }
     return NULL;
