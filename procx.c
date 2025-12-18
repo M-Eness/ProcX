@@ -312,6 +312,8 @@ int get_menu() {
 void start_process(char* command, ProcessMode mode) {
     char* argv[20];
     char temp_command[256]; // orjinal command shared memorye yazmak için kopyalandı
+
+    command[strcspn(command, "\n")] = '\0';
     strncpy(temp_command, command, 255);
     int argument_count = parse_command(temp_command, argv, 20);
     int status;
@@ -473,7 +475,7 @@ void clean_resources() { // Bu fonksiyon güncellenecek
 }
 
 void shutdown_system() {
-    printf("\n\n[SİSTEM] Kapatma sinyali (Ctrl+C) algılandı. Çıkış yapılıyor...\n");
+    printf("\n\n[SİSTEM] Kapatma sinyali algılandı. Çıkış yapılıyor...\n");
 
     // Terminale bağlı çocukları öldür
     if (shared_memory != NULL && procx_sem != NULL) {
