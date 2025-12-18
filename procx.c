@@ -636,6 +636,7 @@ int main(int argc, char* argv[], char** envp) {
     sa.sa_flags = 0; // fgets'in beklemesini önler
     sigemptyset(&sa.sa_mask);
     sigaction(SIGINT, &sa, NULL);
+    sigaction(SIGHUP, &sa, NULL);
 
     register_terminal();
 
