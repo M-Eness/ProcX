@@ -222,7 +222,11 @@ void send_message(int command, pid_t target) {
         // index doluysa VE o indexte ben yoksam
         if (dest_pid != 0 && dest_pid != getpid()) {
             msg.msg_type = dest_pid; // Adrese teslim
-            msgsnd(msg_queue_id, &msg, sizeof(Message) - sizeof(long), 0);
+            if(msgsnd(msg_queue_id, &msg, sizeof(Message) - sizeof(long), IPC_NOWAIT) == -1) {
+                if (errno == EAGAIN) {
+                    perror("\n[INFO] Mesaj kuyruğu dolu. Mesaj gönderilemedi!");
+                }
+            }
         }
     }
     sem_post(procx_sem);
@@ -411,8 +415,9 @@ void stop_process(int target_pid) {
         }
     }
     if (!found) {
-        printf("[UYARI] PID %d listede bulunamadı!\n", target_pid);
         sem_post(procx_sem);
+        printf("[UYARI] PID %d listede bulunamadı!\n", target_pid);
+
     }
 }
 
