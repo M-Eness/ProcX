@@ -18,9 +18,9 @@
 #include <sys/errno.h>
 #include <sys/msg.h>
 
-#define SHM_NAME "/procx_shm_v6"
-#define SEM_NAME "/procx_sem_v6"
-#define MQ_NAME "procx_mq_v6"
+#define SHM_NAME "/procx_shm_v7"
+#define SEM_NAME "/procx_sem_v7"
+#define MQ_NAME "procx_mq_v7"
 #define MAX_PROCESSES 50
 #define MAX_TERMINALS 2
 
@@ -62,9 +62,10 @@ typedef struct {
 } Message;
 
 int msg_queue_id;
-
 sem_t* procx_sem;
 SharedData* shared_memory;
+volatile sig_atomic_t exit_requested = 0;
+void shutdown_system(void);
 
 int is_numeric(const char* str) {
     if (str == NULL || *str == '\0') return 0;
@@ -270,6 +271,9 @@ int get_menu() {
     int selection;
 
     while (true) {
+        if (exit_requested) {
+            shutdown_system();
+        }
         printf("\n");
         printf("ProcX v1.0\n");
         printf("------------------------\n");
@@ -280,22 +284,23 @@ int get_menu() {
         printf("------------------------\n");
         printf("Seçiminiz: ");
 
-        if (fgets(input, sizeof(input), stdin) != NULL) {
-            if (input[0] == '\n') continue;
-            if (input[0] < '0' || input[0] > '3') {
-                printf("Lütfen menüden geçerli bir seçenek (0-3) girin!\n");
-                continue;
+        if (fgets(input, sizeof(input), stdin) == NULL) {
+            if (exit_requested) {
+                shutdown_system(); // Beklemeden çıkış yap
             }
-            selection = atoi(input);
-            if (selection >= 0 && selection < 4) {
-                return selection;
-            }
-            else {
-                printf("Lütfen geçerli bir sayı girin!\n");
-            }
+            continue;
+        }
+        if (input[0] == '\n') continue;
+        if (input[0] < '0' || input[0] > '3') {
+            printf("Lütfen menüden geçerli bir seçenek (0-3) girin!\n");
+            continue;
+        }
+        selection = atoi(input);
+        if (selection >= 0 && selection < 4) {
+            return selection;
         }
         else {
-            printf("Lütfen sayı girin!\n");
+            printf("Lütfen geçerli sayı girin!\n");
         }
     }
 }
@@ -324,6 +329,7 @@ void start_process(char* command, ProcessMode mode) {
         exit(1);
     }
     else { // parent
+        printf("\n[SUCCESS] Process başlatıldı: PID: %d\n", pid);
         sem_wait(procx_sem);
 
         int index = -1;
@@ -361,6 +367,7 @@ void start_process(char* command, ProcessMode mode) {
             shared_memory->processes[index].is_active = 0;
             shared_memory->process_count--;
             sem_post(procx_sem);
+            printf("\n[INFO] Attached process sonlandı: PID: %d\n", pid);
             send_message(2, pid);
         }
     }
@@ -389,9 +396,9 @@ void get_process_menu() {
 }
 
 void stop_process(int target_pid) {
-    sem_wait(procx_sem);
-
     int found = 0;
+
+    sem_wait(procx_sem);
     for (int i = 0; i < MAX_PROCESSES; i++) {
         if (shared_memory->processes[i].is_active) {
             if (shared_memory->processes[i].pid == target_pid) {
@@ -405,6 +412,7 @@ void stop_process(int target_pid) {
     }
     if (!found) {
         printf("[UYARI] PID %d listede bulunamadı!\n", target_pid);
+        sem_post(procx_sem);
     }
 }
 
@@ -459,7 +467,7 @@ void clean_resources() { // Bu fonksiyon güncellenecek
     }
 }
 
-void handle_sigint(int sig) {
+void shutdown_system() {
     printf("\n\n[SİSTEM] Kapatma sinyali (Ctrl+C) algılandı. Çıkış yapılıyor...\n");
 
     // Terminale bağlı çocukları öldür
@@ -483,7 +491,7 @@ void handle_sigint(int sig) {
                 }
                 else { // Detach processler
                     // Çalışmaya devam eder ama artık procx yönetiminde olmaz??
-                    printf("[BİLGİ] Detached process arka planda bırakıldı: %d\n", shared_memory->processes[i].pid);
+                    printf("[INFO] Detached process arka planda bırakıldı: %d\n", shared_memory->processes[i].pid);
                 }
             }
         }
@@ -491,6 +499,11 @@ void handle_sigint(int sig) {
     }
     clean_resources();
     exit(0);
+}
+
+void handle_sigint(int sig) {
+    // Çıkış flagı
+    exit_requested = 1;
 }
 
 void* monitor_thread(void* arg) {
@@ -580,7 +593,13 @@ int main(int argc, char* argv[], char** envp) {
     init_shared_memory();
     init_semephore();
     init_message_queue();
-    signal(SIGINT, handle_sigint);
+    // Action
+    struct sigaction sa;
+    sa.sa_handler = handle_sigint;
+    sa.sa_flags = 0; // fgets'in beklemesini önler
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGINT, &sa, NULL);
+
     register_terminal();
 
     pthread_t thread_id;
