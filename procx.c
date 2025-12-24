@@ -22,7 +22,7 @@
 #define SEM_NAME "/procx_sem_v7"
 #define MQ_NAME "procx_mq_v7"
 #define MAX_PROCESSES 50
-#define MAX_TERMINALS 2
+#define MAX_TERMINALS 3
 
 // Process bilgisi
 typedef enum {
@@ -69,7 +69,7 @@ pthread_t thread_id_monitor;
 pthread_t thread_id_ipc;
 void shutdown_system(void);
 
-int is_numeric(const char* str) {
+int is_numeric(const char* str) { // input numerik mi?
     if (str == NULL || *str == '\0') return 0;
 
     while (*str) {
@@ -81,7 +81,7 @@ int is_numeric(const char* str) {
     return 1;
 }
 
-int parse_command(char* line, char** argv, int max_args) {
+int parse_command(char* line, char** argv, int max_args) { // gelen komutu execvp için uygun formatta parçala
     int argc = 0;
     char* token;
     // newline varsa sil
@@ -95,11 +95,11 @@ int parse_command(char* line, char** argv, int max_args) {
         argv[argc++] = token;
         token = strtok(NULL, " ");
     }
-    argv[argc] = NULL;
+    argv[argc] = NULL; // Son karakter null olmalı
     return argc;
 }
 
-void init_shared_memory() {
+void init_shared_memory() { // shared memory'i başlat
     // Shared Memory
     int shm_fd = shm_open(SHM_NAME, O_RDWR, 0666);
     int is_first = 0;
@@ -115,7 +115,7 @@ void init_shared_memory() {
 
     // Boyutu düzenle
     if (is_first) {
-        if (ftruncate(shm_fd, sizeof(SharedData)) == -1) {
+        if (ftruncate(shm_fd, sizeof(SharedData)) == -1) { // Boyutlandır
             perror("ftruncate hatası");
             close(shm_fd);
             exit(1);
@@ -130,7 +130,7 @@ void init_shared_memory() {
         exit(1);
     }
 
-    if (is_first) {
+    if (is_first) { // ilkse temizle ve process sayısını sıfırla
         memset(shared_memory, 0, sizeof(SharedData)); // Belleği temizle
         shared_memory->process_count = 0;
         printf("İlk process oluşturuldu\n");
@@ -143,7 +143,7 @@ void init_shared_memory() {
     close(shm_fd);
 }
 
-void init_semaphore() {
+void init_semaphore() { // semaphore'u başlat
     procx_sem = sem_open(SEM_NAME, O_CREAT, 0666, 1);
     if (procx_sem == SEM_FAILED) {
         perror("Semaphore hatası");
@@ -152,7 +152,7 @@ void init_semaphore() {
     printf("Semaphore oluşturuldu");
 }
 
-void init_message_queue() {
+void init_message_queue() { // message queue'yu başlat
     int fd = open(MQ_NAME, O_CREAT | O_RDWR, 0666);
     if (fd == -1) {
         perror("ftok dosyası oluşturulamadı");
@@ -168,7 +168,7 @@ void init_message_queue() {
     }
 }
 
-void register_terminal() {
+void register_terminal() { // Terminali kaydet
     sem_wait(procx_sem);
 
     int registered = 0;
@@ -198,7 +198,7 @@ void register_terminal() {
     sem_post(procx_sem);
 }
 
-int remove_terminal() {
+int remove_terminal() { // program kapandığında terminali listeden çıkar
     if (shared_memory == NULL) return -1;
     int terminal_count = 0;
 
@@ -217,7 +217,7 @@ int remove_terminal() {
     return terminal_count;
 }
 
-void send_message(int command, pid_t target) {
+void send_message(int command, pid_t target) { // ipc mesaj gönder
     Message msg;
     msg.command = command;
     msg.sender_pid = getpid();
@@ -241,7 +241,7 @@ void send_message(int command, pid_t target) {
     sem_post(procx_sem);
 }
 
-void list_processes() {
+void list_processes() { // mevcut processleri listele
     sem_wait(procx_sem);
 
     int count = 0;
@@ -284,8 +284,8 @@ int get_menu() {
     int selection;
 
     while (true) {
-        if (exit_requested) {
-            shutdown_system();
+        if (exit_requested) { // Flag set edildiyse
+            shutdown_system(); // Çıkış yap
         }
         printf("\n");
         printf("ProcX v1.0\n");
@@ -418,7 +418,7 @@ void stop_process(int target_pid) {
         if (shared_memory->processes[i].is_active) {
             if (shared_memory->processes[i].pid == target_pid) {
                 kill(target_pid, SIGTERM);
-                printf("[INFO] Process %d sonlandırıldı ve listeden silindi.\n", target_pid);
+                printf("[INFO] Process %d öldürüldü.\n", target_pid);
                 found = 1;
                 sem_post(procx_sem);
                 break;
@@ -566,7 +566,7 @@ void* monitor_thread(void* arg) {
                 }
             }
             else { // Çocuğun parentı ben değilsem
-                // kill sinyali gönderilemedi ve bunun nedeni pıd bulunaması (process ölmüş)
+                // kill pid yi bulamadı (process ölmüş)
                 if (kill(check_pid, 0) == -1 && errno == ESRCH) {
                     found = 1;
                 }
@@ -581,7 +581,7 @@ void* monitor_thread(void* arg) {
                     shared_memory->process_count--;
                     cleaned = 1;
 
-                    printf("\n[MONITOR] Process %d sonlandırıldı (Owner: %d).\n", check_pid, owner_pid);
+                    printf("\n[MONITOR] Process %d temizlendi (Owner: %d).\n", check_pid, owner_pid);
                 }
                 sem_post(procx_sem);
 
@@ -611,7 +611,7 @@ void* ipc_thread(void* arg) {
             break;
         }
 
-        if (message.sender_pid == getpid()) {
+        if (message.sender_pid == getpid()) { // Mesaj zaten benden geldiyse geç
             continue;
         }
 
